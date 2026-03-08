@@ -161,8 +161,8 @@ export default function Home() {
     <main className="container">
       <header className="top-header">
         <div className="header-brand">
-          <h1>United<br />Group<br />Holding</h1>
-          <p className="subtitle">LIVE QUEUE<br />MANAGEMENT</p>
+          <h1>United Group Holding</h1>
+          <p className="subtitle">LIVE QUEUE MANAGEMENT</p>
         </div>
 
         <div className="header-stats">
