@@ -123,20 +123,23 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // Filter valid rows for "today"
   let validData = data;
   if (isMounted && currentTime) {
     const today = new Date(currentTime);
     today.setHours(0, 0, 0, 0);
 
     validData = data.filter(row => {
-      if (!row.Updated) return false;
+      if (!row.Updated || row.Updated.trim() === '') return false;
       const datePart = row.Updated.split(' ')[0];
       if (!datePart) return false;
-      const [month, day, year] = datePart.split('/');
-      if (!month || !day || !year) return false;
-      const checkinDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
-      return checkinDate.getTime() >= today.getTime();
+
+      // Parse the date part directly into a Date object (handles "M/D/YYYY" gracefully)
+      const parsedDate = new Date(datePart);
+      if (isNaN(parsedDate.getTime())) return false;
+
+      // Normalize both dates for comparison
+      parsedDate.setHours(0, 0, 0, 0);
+      return parsedDate.getTime() === today.getTime();
     });
   }
 
