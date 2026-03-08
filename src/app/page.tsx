@@ -6,31 +6,70 @@ import Papa from "papaparse";
 const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1ymSKgnlYA2ZsLDcyhejyLaqXZvbJkmra4PAmvGoPlfw/export?format=csv&gid=0";
 const POLLING_INTERVAL_MS = 5000;
 
-// Type for the parsed Google Sheet data
 interface SheetRow {
   ID: string;
   Name: string;
   Phone: string;
   Email: string;
-  Checkin: string;
   Status: string;
   Recruiter: string;
   MC: string;
   Comments: string;
-  _isNew?: boolean; // For tracking newly added rows to animate them
+  Updated: string;
+  _isNew?: boolean;
+}
+
+const CARDS_CONFIG = [
+  { id: 'CHECKIN', label: 'CHECKED IN' },
+  { id: 'HR-INTERVIEW', label: 'HR DEPARTMENT' },
+  { id: 'PRE-SCREENING-INTERVIEW', label: 'PRE-SCREENING INTERVIEW' },
+  { id: 'ROAD-TEST', label: 'ROAD TEST' },
+  { id: 'SAFETY', label: 'SAFETY DEPARTMENT' },
+  { id: 'ACCOUNTING', label: 'ACCOUNTING DEPARTMENT' },
+];
+
+function getElapsedMinutes(checkinStr: string): number {
+  if (!checkinStr) return 0;
+  const checkinDate = new Date(checkinStr);
+  if (isNaN(checkinDate.getTime())) return 0;
+  const now = new Date();
+  const diffMs = now.getTime() - checkinDate.getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  return minutes > 0 ? minutes : 0;
+}
+
+function formatElapsedTime(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (mins === 0) return `${hrs} hr`;
+  return `${hrs} hr ${mins} min`;
+}
+
+function getTimeColorClass(minutes: number): string {
+  if (minutes >= 45) return 'time-danger';
+  if (minutes >= 25) return 'time-warning';
+  return 'time-normal';
 }
 
 export default function Home() {
   const [data, setData] = useState<SheetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const prevDataIdsRef = useRef<Set<string>>(new Set());
 
+  // Wait for hydration to show times securely
+  useEffect(() => {
+    setIsMounted(true);
+    setCurrentTime(new Date());
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const fetchData = useCallback(async (isInitial = false) => {
     try {
-      // Add a random dummy parameter to bypass Google's Edge caching of public sheets
       const response = await fetch(`${GOOGLE_SHEET_CSV_URL}&t=${new Date().getTime()}&_=${Math.random()}`, {
         cache: 'no-store'
       });
@@ -42,14 +81,9 @@ export default function Home() {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-          if (results.errors.length > 0) {
-            console.warn("CSV parsing warnings:", results.errors);
-          }
-
           let parsedData = results.data;
 
           if (!isInitial) {
-            // Identify new rows relative to the previous data to apply animation
             const prevIds = prevDataIdsRef.current;
             parsedData = parsedData.map(row => {
               const idStr = row.ID?.toString() || JSON.stringify(row);
@@ -60,7 +94,6 @@ export default function Home() {
             });
           }
 
-          // Update previous IDs reference
           const newIds = new Set<string>();
           parsedData.forEach(row => {
             const idStr = row.ID?.toString() || JSON.stringify(row);
@@ -69,7 +102,6 @@ export default function Home() {
           prevDataIdsRef.current = newIds;
 
           setData(parsedData);
-          setLastUpdate(new Date());
           if (isInitial) setLoading(false);
         },
         error: (err: Error) => {
@@ -84,148 +116,155 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    setIsMounted(true);
     fetchData(true);
     const interval = setInterval(() => {
       fetchData(false);
     }, POLLING_INTERVAL_MS);
-
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // Derived metrics
-  const totalRows = data.length;
-  const uniqueRecruiters = new Set(data.map(d => d.Recruiter).filter(Boolean)).size;
-  const activeRoadTests = data.filter(d => d.Status?.toLowerCase().includes("road test")).length;
+  // Filter valid rows for "today"
+  let validData = data;
+  if (isMounted && currentTime) {
+    const today = new Date(currentTime);
+    today.setHours(0, 0, 0, 0);
+
+    validData = data.filter(row => {
+      if (!row.Updated) return false;
+      const datePart = row.Updated.split(' ')[0];
+      if (!datePart) return false;
+      const [month, day, year] = datePart.split('/');
+      if (!month || !day || !year) return false;
+      const checkinDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
+      return checkinDate.getTime() >= today.getTime();
+    });
+  }
+
+  const checkedInCount = validData.filter(d => d.Status === 'CHECKIN').length;
+  const inProgressStatuses = ['HR-INTERVIEW', 'PRE-SCREENING-INTERVIEW', 'ROAD-TEST', 'SAFETY', 'ACCOUNTING'];
+  const inProgressCount = validData.filter(d => inProgressStatuses.includes(d.Status)).length;
+  const checkedOutCount = validData.filter(d => d.Status?.toUpperCase() === 'CHECKED OUT').length;
+
+  let timeString = '--:--:--';
+  let amPmPart = '';
+  let dateString = '';
+
+  if (isMounted && currentTime) {
+    const fullTimeStr = currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+    const parts = fullTimeStr.split(' ');
+    timeString = parts[0];
+    amPmPart = parts[1] || '';
+    dateString = currentTime.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  }
 
   return (
     <main className="container">
-      <header className="header">
-        <div>
-          <h1 className="text-gradient">DriverDetect - Live Streamer</h1>
+      <header className="top-header">
+        <div className="header-brand">
+          <h1>United<br />Group<br />Holding</h1>
+          <p className="subtitle">LIVE QUEUE<br />MANAGEMENT</p>
         </div>
-        <div className="live-indicator glass-panel" style={{ padding: '0.5rem 1rem', borderRadius: '50px' }}>
-          <div className="indicator-dot"></div>
-          {loading ? "Connecting..." : "Live"}
+
+        <div className="header-stats">
+          <div className="header-stat-item">
+            <div className="stat-icon">➔</div>
+            <div className="stat-content">
+              <span className="header-stat-value">{checkedInCount}</span>
+              <span className="header-stat-label">CHECKED<br />IN</span>
+            </div>
+          </div>
+
+          <div className="header-stat-item">
+            <div className="stat-icon">👥</div>
+            <div className="stat-content">
+              <span className="header-stat-value">{inProgressCount}</span>
+              <span className="header-stat-label">IN<br />PROGRESS</span>
+            </div>
+          </div>
+
+          <div className="header-stat-item">
+            <div className="stat-icon">←</div>
+            <div className="stat-content">
+              <span className="header-stat-value">{checkedOutCount}</span>
+              <span className="header-stat-label">CHECKED<br />OUT</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="header-clock">
+          <div className="clock-time">
+            {timeString}
+            <span className="clock-am-pm">{amPmPart}</span>
+          </div>
+          <div className="clock-date">{dateString}</div>
         </div>
       </header>
 
       {error && (
-        <div className="glass-panel" style={{ borderColor: 'var(--status-error)', marginBottom: '2rem' }}>
-          <h3 style={{ color: 'var(--status-error)' }}>Error Loading Data</h3>
-          <p>{error}</p>
+        <div className="status-card" style={{ padding: '1.5rem', borderColor: 'var(--status-error)', marginBottom: '2rem' }}>
+          <h3 style={{ color: 'var(--status-error)', margin: 0 }}>Error Loading Data</h3>
+          <p style={{ marginTop: '0.5rem' }}>{error}</p>
         </div>
       )}
 
-      {/* Summary Stats */}
-      <section className="stats-grid">
-        <div className="glass-panel stat-card">
-          <div className="stat-value">{totalRows}</div>
-          <div className="stat-label">Total Records</div>
+      {loading && data.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+          Loading data stream...
         </div>
-        <div className="glass-panel stat-card">
-          <div className="stat-value text-gradient">{uniqueRecruiters}</div>
-          <div className="stat-label">Recruiters</div>
-        </div>
-        <div className="glass-panel stat-card">
-          <div className="stat-value">{activeRoadTests}</div>
-          <div className="stat-label">Road Tests</div>
-        </div>
-        <div className="glass-panel stat-card">
-          <div className="stat-value" style={{ fontSize: '1.2rem', margin: 'auto' }}>
-            {isMounted && lastUpdate ? lastUpdate.toLocaleTimeString() : '--:--:--'}
-          </div>
-          <div className="stat-label">Last Updated</div>
-        </div>
-      </section>
+      ) : (
+        <section className="cards-grid">
+          {CARDS_CONFIG.map((card, idx) => {
+            const cardDrivers = validData.filter(d => d.Status === card.id);
+            const sortedDrivers = [...cardDrivers].sort((a, b) => {
+              const timeA = new Date(a.Updated).getTime() || 0;
+              const timeB = new Date(b.Updated).getTime() || 0;
+              return timeA - timeB;
+            });
 
-      {/* Main Data Grid */}
-      <section className="glass-panel table-container">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Phone / Email</th>
-              <th>Checkin</th>
-              <th>Status</th>
-              <th>Recruiter / MC</th>
-              <th>Comments</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && data.length === 0 ? (
-              <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
-                  Loading data stream...
-                </td>
-              </tr>
-            ) : data.length === 0 ? (
-              <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
-                  No records found.
-                </td>
-              </tr>
-            ) : (
-              data
-                .filter((row) => {
-                  if (!row.Checkin) return false;
+            return (
+              <div key={card.id} className="status-card">
+                <div className="card-header">
+                  <div className="card-number-box">{idx + 1}</div>
+                  <div className="card-title-area">
+                    <h2 className="card-title">{card.label}</h2>
+                    <div className="card-subtitle">{cardDrivers.length} {cardDrivers.length === 1 ? 'driver' : 'drivers'} in queue</div>
+                  </div>
+                </div>
 
-                  // Set target date 
-                  const targetDate = new Date();
-                  targetDate.setMonth(2, 1);
-                  targetDate.setHours(0, 0, 0, 0);
+                <div className="card-body">
+                  {sortedDrivers.length === 0 ? (
+                    <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      No drivers
+                    </div>
+                  ) : (
+                    sortedDrivers.map((driver, driverIdx) => {
+                      const minutes = isMounted ? getElapsedMinutes(driver.Updated) : 0;
+                      const timeColorClass = getTimeColorClass(minutes);
+                      const keyStr = driver.ID ? `${driver.ID}-${driverIdx}` : `row-${driverIdx}`;
 
-                  // Parse the check-in date manually to avoid cross-browser timezone/format issues
-                  // Expected format: "M/D/YYYY H:MM:SS" or "MM/DD/YYYY"
-                  const datePart = row.Checkin.split(' ')[0]; // Gets "3/1/2026"
-                  if (!datePart) return false;
+                      return (
+                        <div key={keyStr} className={`driver-row ${driver._isNew ? 'row-new' : ''}`}>
+                          <div className="driver-index">{driverIdx + 1}</div>
+                          <div className="driver-name">{driver.Name || '-'}</div>
+                          {isMounted && (
+                            <div className={`driver-time ${timeColorClass}`}>
+                              {formatElapsedTime(minutes)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
 
-                  const [month, day, year] = datePart.split('/');
-                  if (!month || !day || !year) return false;
-
-                  const checkinDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
-
-                  return checkinDate >= targetDate;
-                })
-                .map((row, idx) => {
-                  // Using a combination of id and index for key in case IDs duplicate
-                  const keyStr = row.ID ? `${row.ID}-${idx}` : `row-${idx}`;
-                  return (
-                    <tr key={keyStr} className={row._isNew ? "row-new" : ""}>
-                      <td>
-                        <span className="badge">{row.ID || '-'}</span>
-                      </td>
-                      <td style={{ fontWeight: 500 }}>{row.Name || '-'}</td>
-                      <td>
-                        <div style={{ fontSize: '0.9rem' }}>{row.Phone || '-'}</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{row.Email}</div>
-                      </td>
-                      <td>
-                        <div style={{ fontWeight: 500 }}>{row.Checkin || '-'}</div>
-                      </td>
-                      <td>
-                        {row.Status ? (
-                          <span className={`badge ${row.Status.toLowerCase().includes('road test') ? 'badge-active' : ''}`}>
-                            {row.Status}
-                          </span>
-                        ) : '-'}
-                      </td>
-
-                      <td>
-                        <div style={{ fontWeight: 500 }}>{row.Recruiter || '-'}</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{row.MC}</div>
-                      </td>
-                      <td style={{ maxWidth: '300px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.Comments}>
-                        {row.Comments || '-'}
-                      </td>
-                    </tr>
-                  );
-                })
-            )}
-          </tbody>
-        </table>
-      </section>
+      <footer className="footer-branding">
+        Powered by <strong>DriverDetect AI</strong> — AI Based Fully Automated Driver Recruitment
+      </footer>
     </main>
   );
 }
