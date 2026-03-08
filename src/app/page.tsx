@@ -162,7 +162,19 @@ export default function Home() {
       <header className="top-header">
         <div className="header-brand">
           <h1>United Group Holding</h1>
-          <p className="subtitle">LIVE QUEUE MANAGEMENT</p>
+          <p className="subtitle">
+            {loading ? (
+              <>
+                CONNECTING...
+                <span className="indicator-dot connecting-dot"></span>
+              </>
+            ) : (
+              <>
+                LIVE QUEUE MANAGEMENT
+                <span className="indicator-dot"></span>
+              </>
+            )}
+          </p>
         </div>
 
         <div className="header-stats">
