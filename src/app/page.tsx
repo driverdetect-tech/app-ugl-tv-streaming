@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Papa from "papaparse";
 
-const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1ymSKgnlYA2ZsLDcyhejyLaqXZvbJkmra4PAmvGoPlfw/export?format=csv&gid=0";
+const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1p-m3t6W88uIDJ64XUStyzpREo5FEZdcgMdGEOczdBzg/export?format=csv&gid=2056493957";
 const POLLING_INTERVAL_MS = 5000;
 
 interface SheetRow {
